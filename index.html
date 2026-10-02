@@ -1859,9 +1859,10 @@ async function triggerDownload(canvas, filename){
   }
 
   // Fallback that works even when fetch() is blocked by CORS: Google's JSON endpoint loaded as a <script>.
+  let __gvN = 0;
   function fetchJSONP(sel){
     return new Promise((resolve, reject) => {
-      const cb = "__gv_" + Date.now();
+      const cb = "__gv_" + Date.now() + "_" + (++__gvN);
       const s = document.createElement("script");
       const done = () => { clearTimeout(timer); delete window[cb]; s.remove(); };
       const timer = setTimeout(() => { done(); reject(new Error("jsonp timeout")); }, 15000);
@@ -1949,7 +1950,7 @@ async function triggerDownload(canvas, filename){
 
     const avail = [...new Set(recs.map(x => x.dt.m))];
     const latest = recs[recs.length - 1].dt.m;
-    const month = (forced != null && avail.includes(forced)) ? forced : latest;
+    const month = (forced != null && avail.includes(forced % 12)) ? forced % 12 : latest;
     const use = recs.filter(x => x.dt.m === month);
     const label = d => `${MON_LABEL[month]} ${d}`;
     const days = [...new Set(use.map(x => x.dt.d))].sort((a, b) => a - b);
@@ -1996,18 +1997,22 @@ async function triggerDownload(canvas, filename){
     }
     if(TARGETS && !Object.keys(TARGETS).length) TARGETS = null;
 
-    const year = new Date().getFullYear();
+    const year = (forced != null) ? Math.floor(forced / 12) : 2026;
     return {
       TARGETS,
       EMBEDDED_DATA: { contractors: Object.values(con).sort((a, b) => b.total - a.total), statusTotals },
       CONTRACTOR_HUBS, TODAY_ACQ,
       CONTRACTOR_DAILY: conDaily, HUB_DAILY: hubDaily,
       HUB_DAILY_DATES: days.map(label),
-      MONTH_LABEL: MON_LABEL[month], MONTH0: month, YEAR: year, AVAIL: availAll || avail
+      MONTH_LABEL: MON_LABEL[month], MONTH0: month, YEAR: year, KEY: year * 12 + month, AVAIL: availAll || avail.map(m => year * 12 + m)
     };
   }
 
-  const SHOW_MONTHS = [8, 9, 10, 11];
+  const KEY = (y, m) => y * 12 + m;
+  const SHOW_GROUPS = [
+    { year: 2026, months: [8, 9, 10, 11] },
+    { year: 2027, months: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }
+  ];
   function getSel(){
     try{ const v = sessionStorage.getItem("__dash_month"); if(v !== null) return parseInt(v, 10); }catch(e){}
     const m = (location.hash || "").match(/month=(\d+)/);
@@ -2021,21 +2026,45 @@ async function triggerDownload(canvas, filename){
   }
   function monthBar(live){
     const wrap = document.querySelector("#page-dashboard .controls");
-    if(!wrap || document.getElementById("monthSelect")) return;
-    const sel = document.createElement("select");
-    sel.id = "monthSelect";
-    sel.title = "Select month";
-    SHOW_MONTHS.forEach(m => {
-      const o = document.createElement("option");
-      const has = live.AVAIL.includes(m);
-      o.value = String(m);
-      o.textContent = "\uD83D\uDCC5 " + MON_LABEL[m] + " " + live.YEAR + (has ? "" : " (no data yet)");
-      o.disabled = !has && m !== live.MONTH0;
-      if(m === live.MONTH0) o.selected = true;
-      sel.appendChild(o);
+    if(!wrap || document.getElementById("monthPicker")) return;
+    const box = document.createElement("div");
+    box.id = "monthPicker";
+    box.style.cssText = "position:relative;display:inline-block";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "\uD83D\uDCC5 " + live.MONTH_LABEL + " " + live.YEAR + "  \u25BE";
+    btn.style.cssText = "font:600 14px Inter,sans-serif;padding:9px 14px;border-radius:10px;border:1px solid #C9CEDA;" +
+      "background:#fff;color:#14181F;cursor:pointer;white-space:nowrap";
+    const pop = document.createElement("div");
+    pop.style.cssText = "display:none;position:absolute;top:calc(100% + 6px);left:0;z-index:9500;background:#fff;" +
+      "border:1px solid #E4E6EC;border-radius:12px;padding:12px;box-shadow:0 10px 30px rgba(0,0,0,.15);width:330px;max-width:90vw";
+    SHOW_GROUPS.forEach(g => {
+      const t = document.createElement("div");
+      t.textContent = g.year;
+      t.style.cssText = "font:700 12px Inter,sans-serif;color:#6B7280;margin:4px 2px 6px;letter-spacing:.5px";
+      pop.appendChild(t);
+      const grid = document.createElement("div");
+      grid.style.cssText = "display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px";
+      g.months.forEach(m => {
+        const k = KEY(g.year, m);
+        const has = live.AVAIL.includes(k), on = k === live.KEY;
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = MON_LABEL[m];
+        b.disabled = !has && !on;
+        b.title = has ? "" : "No data yet";
+        b.style.cssText = "font:600 13px Inter,sans-serif;padding:9px 6px;border-radius:8px;border:1px solid " + (on ? "#14181F" : "#E4E6EC") +
+          ";background:" + (on ? "#14181F" : "#F3F4F7") + ";color:" + (on ? "#fff" : "#14181F") +
+          ";cursor:" + (b.disabled ? "not-allowed" : "pointer") + ";opacity:" + (b.disabled ? ".4" : "1");
+        if(has && !on) b.onclick = () => setSel(k);
+        grid.appendChild(b);
+      });
+      pop.appendChild(grid);
     });
-    sel.onchange = () => setSel(parseInt(sel.value, 10));
-    wrap.insertBefore(sel, wrap.firstChild);
+    btn.onclick = e => { e.stopPropagation(); pop.style.display = pop.style.display === "none" ? "block" : "none"; };
+    document.addEventListener("click", e => { if(!box.contains(e.target)) pop.style.display = "none"; });
+    box.appendChild(btn); box.appendChild(pop);
+    wrap.insertBefore(box, wrap.firstChild);
   }
 
   function toast(msg){
@@ -2157,31 +2186,35 @@ async function triggerDownload(canvas, filename){
     wb.SheetNames.forEach(n => {
       const m = MON3.indexOf(n.trim().slice(0, 3).toLowerCase());
       if(m < 0) return;
-      tabs[m] = XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: false, defval: "" });
+      const ym = n.match(/(20\d\d)/);
+      tabs[KEY(ym ? parseInt(ym[1], 10) : 2026, m)] = XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: false, defval: "" });
     });
     return tabs;
   }
   async function fetchTabsWeb(){
     // Outside claude.ai: read each month tab by name through Google's script endpoint (no CORS issue)
     const tabs = {};
-    for(const m of [9, 10, 11]){
-      const nm = MON3[m].charAt(0).toUpperCase() + MON3[m].slice(1);
-      try{
-        const rows = await fetchJSONP("sheet=" + encodeURIComponent(nm));
-        if(monthsIn(rows).includes(m)) tabs[m] = rows;
-      }catch(e){ /* tab missing or not public yet */ }
-    }
+    const jobs = [];
+    SHOW_GROUPS.forEach(g => g.months.forEach(m => {
+      if(g.year === 2026 && m === 8) return;          // Sep 2026 is frozen
+      const base = MON3[m].charAt(0).toUpperCase() + MON3[m].slice(1);
+      const nm = g.year === 2026 ? base : base + " " + g.year;
+      jobs.push(fetchJSONP("sheet=" + encodeURIComponent(nm)).then(rows => {
+        if(monthsIn(rows).includes(m)) tabs[KEY(g.year, m)] = rows;
+      }).catch(() => {}));
+    }));
+    await Promise.all(jobs);
     return tabs;
   }
   async function loadSources(){
     const src = {};
-    src[8] = parseCSV(SNAPSHOT_CSV);                 // September: fixed, never re-read
+    src[KEY(2026, 8)] = parseCSV(SNAPSHOT_CSV);      // September 2026: fixed, never re-read
     const inClaude = !!(window.claude && typeof window.claude.use === "function");
     try{
       const tabs = inClaude ? await fetchTabs() : await fetchTabsWeb();
       Object.keys(tabs).forEach(k => {
-        const m = parseInt(k, 10);
-        if(m !== 8 && monthsIn(tabs[k]).includes(m)) src[m] = tabs[k];
+        const key = parseInt(k, 10);
+        if(key !== KEY(2026, 8) && monthsIn(tabs[k]).includes(key % 12)) src[key] = tabs[k];
       });
     }catch(e){ /* keep Sep only */ }
     return src;
