@@ -380,7 +380,7 @@ const __FB_HUB_DAILY_DATES = ["Sep 1","Sep 2","Sep 3","Sep 5","Sep 6","Sep 7","S
 
 // ---- Live data from Google Sheet (falls back to the snapshot above if the sheet is unreachable) ----
 const __L = window.__LIVE_DATA || {};
-const TARGETS = __L.TARGETS || __FB_TARGETS;
+const TARGETS = __L.TARGETS || ((__L.KEY != null && __L.KEY !== 2026 * 12 + 8) ? {} : __FB_TARGETS);
 const EMBEDDED_DATA = __L.EMBEDDED_DATA || __FB_EMBEDDED_DATA;
 const CONTRACTOR_HUBS = __L.CONTRACTOR_HUBS || __FB_CONTRACTOR_HUBS;
 const TODAY_ACQ = __L.TODAY_ACQ || __FB_TODAY_ACQ;
@@ -1984,7 +1984,7 @@ async function triggerDownload(canvas, filename){
     for(let r = 0; r < Math.min(rows.length, 10) && !TARGETS; r++){
       const cells = rows[r].map(c => (c || "").trim().toLowerCase());
       for(let j = 0; j < cells.length - 1; j++){
-        if(cells[j] === "contractor" && cells[j+1] === "target"){
+        if(cells[j] === "contractor" && (cells[j+1] === "target" || cells[j+2] === "missing" || j >= 5)){
           TARGETS = {};
           let gap = 0;
           for(let k = r + 1; k < rows.length; k++){
