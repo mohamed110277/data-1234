@@ -470,13 +470,14 @@ const contractors = EMBEDDED_DATA.contractors;
 
 function fmt(n){ return (n||0).toLocaleString("en-US"); }
 function missingFor(name, total){ return Math.max((TARGETS[name] || 0) - total, 0); }
-function pctOfTarget(name, total){ const t = TARGETS[name] || 0; return t > 0 ? Math.round((total / t) * 100) : (total > 0 ? 100 : 0); }
+function pctOfTarget(name, total){ const t = TARGETS[name] || 0; return t > 0 ? Math.round((total / t) * 100) : 0; }
 const LATEST_DATE_LABEL = HUB_DAILY_DATES.length ? HUB_DAILY_DATES[HUB_DAILY_DATES.length - 1] : "";
 
 function renderKPIs(){
   const totalStars = contractors.reduce((a,c)=>a+c.total,0);
   const totalTarget = Object.values(TARGETS).reduce((a,v)=>a+(v||0),0);
-  const totalMissing = Math.max(totalTarget - totalStars, 0);
+  const targetedStars = contractors.reduce((a,c)=>a+((TARGETS[c.name]||0) > 0 ? c.total : 0),0);
+  const totalMissing = Math.max(totalTarget - targetedStars, 0);
   const totalReactivate = contractors.reduce((a,c)=>a+(c.statusCounts["Reactivate"]||0),0);
   const totalNewStar = contractors.reduce((a,c)=>a+(c.statusCounts["New Star"]||0),0);
   const totalToday = Object.values(TODAY_ACQ).reduce((a,v)=>a+v,0);
@@ -1874,7 +1875,7 @@ async function triggerDownload(canvas, filename){
         resolve(resp.table.rows.map(r => (r.c || []).map(c => (c == null || c.v == null) ? "" : String(c.v))));
       };
       s.onerror = () => { done(); reject(new Error("jsonp blocked")); };
-      s.src = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?${sel || "gid=" + GID}&headers=0&tqx=out:json;responseHandler:${cb}`;
+      s.src = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?${sel || "gid=" + GID}&headers=0&tqx=out:json;responseHandler:${cb}&_=${Date.now()}`;
       document.head.appendChild(s);
     });
   }
@@ -1886,7 +1887,7 @@ async function triggerDownload(canvas, filename){
     const mcp = await w.use("mcp");
     if(!mcp) throw new Error("mcp unavailable");
     const res = await mcp.callTool("Google Drive", "download_file_content",
-      { fileId: SHEET_ID, exportMimeType: "text/csv" }, { cache: { staleTime: 60000 } });
+      { fileId: SHEET_ID, exportMimeType: "text/csv" }, { cache: { staleTime: 0 } });
     const txt = (res.content || []).find(b => b.type === "text");
     if(!txt) throw new Error("empty drive response");
     const o = JSON.parse(txt.text);
@@ -1985,10 +1986,12 @@ async function triggerDownload(canvas, filename){
       for(let j = 0; j < cells.length - 1; j++){
         if(cells[j] === "contractor" && cells[j+1] === "target"){
           TARGETS = {};
+          let gap = 0;
           for(let k = r + 1; k < rows.length; k++){
-            const nm = (rows[k][j] || "").trim();
-            if(!nm) break;
-            const v = parseFloat((rows[k][j+1] || "").replace(/,/g, ""));
+            const nm = String(rows[k][j] == null ? "" : rows[k][j]).trim();
+            if(!nm){ if(++gap >= 3) break; continue; }
+            gap = 0;
+            const v = parseFloat(String(rows[k][j+1] == null ? "" : rows[k][j+1]).replace(/,/g, ""));
             if(!isNaN(v)) TARGETS[nm] = v;
           }
           break;
@@ -1996,6 +1999,14 @@ async function triggerDownload(canvas, filename){
       }
     }
     if(TARGETS && !Object.keys(TARGETS).length) TARGETS = null;
+    if(TARGETS){
+      const nk = s => String(s).toLowerCase().replace(/[\u2010-\u2015\u2212]/g, "-").replace(/\s+/g, " ").replace(/\s*-\s*/g, "-").trim();
+      const canon = {};
+      Object.keys(con).forEach(n => canon[nk(n)] = n);
+      const fixed = {};
+      Object.keys(TARGETS).forEach(n => { fixed[canon[nk(n)] || n] = TARGETS[n]; });
+      TARGETS = fixed;
+    }
 
     const year = (forced != null) ? Math.floor(forced / 12) : 2026;
     return {
@@ -2168,7 +2179,7 @@ async function triggerDownload(canvas, filename){
       if(!mcp) throw new Error("mcp unavailable");
       const res = await mcp.callTool("Google Drive", "download_file_content",
         { fileId: SHEET_ID, exportMimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
-        { cache: { staleTime: 60000 } });
+        { cache: { staleTime: 0 } });
       const txt = (res.content || []).find(b => b.type === "text");
       if(!txt) throw new Error("empty drive response");
       const o = JSON.parse(txt.text);
