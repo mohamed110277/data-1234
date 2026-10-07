@@ -420,7 +420,16 @@ const ACTUAL_DAYS = HUB_DAILY_DATES
   .filter(d => d.indexOf(MONTH_LABEL + " ") === 0)
   .map(d => parseInt(d.split(" ")[1], 10));
 const MAX_ACTUAL_DAY = ACTUAL_DAYS.length ? Math.max(...ACTUAL_DAYS) : 0;
-const COMPLETED_WEEKS = ALL_WEEKS.filter(w => MAX_ACTUAL_DAY >= w.days[w.days.length - 1]);
+// Every week that has started, with only the days that already have data.
+// The in-progress week counts too (partial: true), so each new day of data
+// moves the forecast instead of waiting for the week to finish.
+const COMPLETED_WEEKS = ALL_WEEKS
+  .filter(w => w.days[0] <= MAX_ACTUAL_DAY)
+  .map(w => ({
+    id: w.id,
+    days: w.days.filter(d => d <= MAX_ACTUAL_DAY),
+    partial: w.days[w.days.length - 1] > MAX_ACTUAL_DAY
+  }));
 // HISTORY_WEEKS = every completed week, shown in full on the chart.
 // BASIS_WEEKS = only the last 3 completed weeks, used for the regression math
 // (recent weeks are the best predictor of what's next; older weeks still get
@@ -435,7 +444,7 @@ const FORECAST_WEEKS = ALL_WEEKS.slice(FIRST_FORECAST_INDEX, FIRST_FORECAST_INDE
 const WEEK_DEFS = [...HISTORY_WEEKS, ...FORECAST_WEEKS].map((w, i) => ({
   id: w.id,
   label: `Week ${w.id}`,
-  range: i < HISTORY_WEEKS.length ? weekRangeLabel(w) : `${weekRangeLabel(w)} (upcoming)`,
+  range: i < HISTORY_WEEKS.length ? weekRangeLabel(w) + (w.partial ? " (so far)" : "") : `${weekRangeLabel(w)} (upcoming)`,
   days: w.days.length,
   forecast: i >= HISTORY_WEEKS.length
 }));
@@ -1234,35 +1243,40 @@ function toggleForecastsMenu(forceOpen){
 // that — but a residual-based band that widens the further out we
 // project) so the forecast reads as an estimate, not a guaranteed number.
 function computeWeeklySeries(dateCountMap){
-  const [w1, w2, w3] = BASIS_WEEKS.map(w => weekTotal(dateCountMap, w));
-  const [d1, d2, d3] = BASIS_WEEKS.map(w => w.days.length);
-  const r1 = d1 ? w1 / d1 : 0, r2 = d2 ? w2 / d2 : 0, r3 = d3 ? w3 / d3 : 0;
+  const ws = BASIS_WEEKS.map(w => weekTotal(dateCountMap, w));
+  const rates = BASIS_WEEKS.map((w, i) => w.days.length ? ws[i] / w.days.length : 0);
+  const n = rates.length;
+  const w1 = ws[0], w2 = ws[1], w3 = n ? ws[n - 1] : undefined;
+  const rLast = n ? rates[n - 1] : 0;
 
   // % growth shown for context only
-  const g1 = r1 > 0 ? (r2 - r1) / r1 : null;
-  const g2 = r2 > 0 ? (r3 - r2) / r2 : null;
+  const g1 = n > 1 && rates[0] > 0 ? (rates[1] - rates[0]) / rates[0] : null;
+  const g2 = n > 2 && rates[1] > 0 ? (rates[2] - rates[1]) / rates[1] : null;
 
-  // Least-squares fit: daily rate as a function of week index (1,2,3)
-  const xs = [1, 2, 3], ys = [r1, r2, r3];
-  const n = 3;
+  // Least-squares fit of daily rate vs week index (needs 3 points; with fewer, use the average rate)
+  const xs = rates.map((_, i) => i + 1), ys = rates;
   const sumX = xs.reduce((a,b)=>a+b,0), sumY = ys.reduce((a,b)=>a+b,0);
-  const sumXY = xs.reduce((a,x,i)=>a + x*ys[i], 0);
-  const sumXX = xs.reduce((a,x)=>a + x*x, 0);
-  const denom = n*sumXX - sumX*sumX;
-  const slope = denom !== 0 ? (n*sumXY - sumX*sumY) / denom : 0;
-  const intercept = (sumY - slope*sumX) / n;
+  let slope = 0, intercept = n ? sumY / n : 0;
+  if(n >= 3){
+    const sumXY = xs.reduce((a,x,i)=>a + x*ys[i], 0);
+    const sumXX = xs.reduce((a,x)=>a + x*x, 0);
+    const denom = n*sumXX - sumX*sumX;
+    slope = denom !== 0 ? (n*sumXY - sumX*sumY) / denom : 0;
+    intercept = (sumY - slope*sumX) / n;
+  }
+  const x4 = n + 1, x5 = n + 2;
 
   const d4 = FORECAST_WEEKS[0] ? FORECAST_WEEKS[0].days.length : 6;
   const d5 = FORECAST_WEEKS[1] ? FORECAST_WEEKS[1].days.length : 6;
 
-  const rate4 = Math.max(0, intercept + slope*4);
-  const rate5 = Math.max(0, intercept + slope*5);
+  const rate4 = Math.max(0, intercept + slope*x4);
+  const rate5 = Math.max(0, intercept + slope*x5);
   const forecastTotal = Math.round(rate4 * d4);
   const forecastTotal5 = Math.round(rate5 * d5);
 
   // Residual-based uncertainty band (widens further into the future)
   const fitted = xs.map(x => intercept + slope*x);
-  const residualStd = Math.sqrt(ys.reduce((a,y,i)=>a + Math.pow(y-fitted[i],2), 0) / n);
+  const residualStd = n ? Math.sqrt(ys.reduce((a,y,i)=>a + Math.pow(y-fitted[i],2), 0) / n) : 0;
   const band4 = Math.max(residualStd * 1.5, rate4 * 0.20);
   const band5 = Math.max(residualStd * 2.0, rate5 * 0.30);
   const forecastLow4 = Math.max(0, Math.round((rate4 - band4) * d4));
@@ -1270,7 +1284,7 @@ function computeWeeklySeries(dateCountMap){
   const forecastLow5 = Math.max(0, Math.round((rate5 - band5) * d5));
   const forecastHigh5 = Math.round((rate5 + band5) * d5);
 
-  const growth4 = r3 > 0 ? (rate4 - r3) / r3 : (rate4 > 0 ? null : 0);
+  const growth4 = rLast > 0 ? (rate4 - rLast) / rLast : (rate4 > 0 ? null : 0);
   const growth5 = rate4 > 0 ? (rate5 - rate4) / rate4 : (rate5 > 0 ? null : 0);
 
   const historyTotals = HISTORY_WEEKS.map(w => weekTotal(dateCountMap, w));
@@ -1353,7 +1367,7 @@ function drawWeeklyChart(canvasId, series, existingChart){
 function renderStatsRow(container, series){
   const w1id = BASIS_WEEKS[0] ? BASIS_WEEKS[0].id : 1;
   const w2id = BASIS_WEEKS[1] ? BASIS_WEEKS[1].id : 2;
-  const w3id = BASIS_WEEKS[2] ? BASIS_WEEKS[2].id : 3;
+  const w3id = BASIS_WEEKS.length ? BASIS_WEEKS[BASIS_WEEKS.length - 1].id : 3;
   const w4id = FORECAST_WEEKS[0] ? FORECAST_WEEKS[0].id : w3id + 1;
   const w5id = FORECAST_WEEKS[1] ? FORECAST_WEEKS[1].id : w3id + 2;
   container.innerHTML = `
