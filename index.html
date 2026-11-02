@@ -1916,7 +1916,8 @@ async function triggerDownload(canvas, filename){
                                 && r.map(c => (c || "").trim().toLowerCase()).includes("hub"));
     if(hi < 0) throw new Error("header row (Date / Hub / contractor / status) not found");
     const head = rows[hi].map(c => (c || "").trim().toLowerCase());
-    const iDate = head.indexOf("date"), iHub = head.indexOf("hub"),
+    let iDate = head.indexOf("date"); if(iDate < 0) iDate = 0;   // date header can come back empty when the column holds real date cells
+    const iHub = head.indexOf("hub"),
           iCon = head.indexOf("contractor"), iSt = head.findIndex(c => c.startsWith("status"));
     if([iDate, iHub, iCon, iSt].some(i => i < 0)) throw new Error("missing column");
 
@@ -2139,7 +2140,7 @@ async function triggerDownload(canvas, filename){
   function monthsIn(rows){
     const hi = rows.findIndex(r => r.map(c => (c || "").trim().toLowerCase()).includes("hub"));
     if(hi < 0) return [];
-    const iDate = rows[hi].map(c => (c || "").trim().toLowerCase()).indexOf("date");
+    let iDate = rows[hi].map(c => (c || "").trim().toLowerCase()).indexOf("date"); if(iDate < 0) iDate = 0;
     const set = new Set();
     for(let r = hi + 1; r < rows.length; r++){ const d = parseDate(rows[r][iDate]); if(d) set.add(d.m); }
     return [...set];
