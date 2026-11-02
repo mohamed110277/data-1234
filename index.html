@@ -1892,6 +1892,11 @@ async function triggerDownload(canvas, filename){
   // "Tuesday, September 1," -> {m:8, d:1}
   function parseDate(s){
     s = (s || "").trim();
+    let gd = s.match(/^Date\((\d{4}),\s*(\d{1,2}),\s*(\d{1,2})/);
+    if(gd) return { m: parseInt(gd[2], 10), d: parseInt(gd[3], 10) };
+    let iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if(iso) return { m: parseInt(iso[2], 10) - 1, d: parseInt(iso[3], 10) };
+    if(/^\d{5}(\.\d+)?$/.test(s)){ const dt0 = new Date(Math.round((parseFloat(s) - 25569) * 86400000)); return { m: dt0.getUTCMonth(), d: dt0.getUTCDate() }; }
     let m = s.match(/([A-Za-z]{3,})\s+(\d{1,2})/);
     if(m){
       const mi = MONTHS.indexOf(m[1].slice(0,3).toLowerCase());
@@ -2178,7 +2183,17 @@ async function triggerDownload(canvas, filename){
       const m = MON3.indexOf(n.trim().slice(0, 3).toLowerCase());
       if(m < 0) return;
       const ym = n.match(/(20\d\d)/);
-      tabs[KEY(ym ? parseInt(ym[1], 10) : 2026, m)] = XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: false, defval: "" });
+      const ws = wb.Sheets[n];
+      // real date cells: write an unambiguous yyyy-mm-dd text so every date style (and any number format) is read the same way
+      Object.keys(ws).forEach(a => {
+        if(a[0] === "!") return;
+        const c = ws[a];
+        if(c && c.t === "n" && c.z && XLSX.SSF.is_date(c.z)){
+          const p = XLSX.SSF.parse_date_code(c.v);
+          if(p) c.w = p.y + "-" + String(p.m).padStart(2, "0") + "-" + String(p.d).padStart(2, "0");
+        }
+      });
+      tabs[KEY(ym ? parseInt(ym[1], 10) : 2026, m)] = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" });
     });
     return tabs;
   }
@@ -2202,7 +2217,10 @@ async function triggerDownload(canvas, filename){
     src[KEY(2026, 8)] = parseCSV(SNAPSHOT_CSV);      // September 2026: fixed, never re-read
     const inClaude = !!(window.claude && typeof window.claude.use === "function");
     try{
-      const tabs = inClaude ? await fetchTabs() : await fetchTabsWeb();
+      let tabs = inClaude ? await fetchTabs() : await fetchTabsWeb();
+      if(inClaude){
+        try{ const extra = await fetchTabsWeb(); Object.keys(extra).forEach(k => { if(!tabs[k]) tabs[k] = extra[k]; }); }catch(e){}
+      }
       Object.keys(tabs).forEach(k => {
         const key = parseInt(k, 10);
         if(key !== KEY(2026, 8) && monthsIn(tabs[k]).includes(key % 12)) src[key] = tabs[k];
