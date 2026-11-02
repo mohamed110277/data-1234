@@ -1931,6 +1931,18 @@ async function triggerDownload(canvas, filename){
       if(dt && hub && con && st) recs.push({ dt, hub, con, st });
     }
     if(!recs.length) throw new Error("no data rows");
+    // Same name typed differently ("Top Line" / "top Line" / extra spaces) = one contractor / hub.
+    // The most-used spelling wins.
+    (function unify(){
+      const nk = s => String(s).toLowerCase().replace(/[\u2010-\u2015\u2212]/g, "-").replace(/\s+/g, " ").replace(/\s*-\s*/g, "-").trim();
+      ["con", "hub"].forEach(f => {
+        const cnt = {};
+        recs.forEach(x => { const k = nk(x[f]); (cnt[k] || (cnt[k] = {}))[x[f]] = (cnt[k][x[f]] || 0) + 1; });
+        const best = {};
+        Object.keys(cnt).forEach(k => { best[k] = Object.entries(cnt[k]).sort((a, b) => b[1] - a[1])[0][0]; });
+        recs.forEach(x => { x[f] = best[nk(x[f])]; });
+      });
+    })();
 
     const avail = [...new Set(recs.map(x => x.dt.m))];
     const latest = recs[recs.length - 1].dt.m;
