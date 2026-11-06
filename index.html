@@ -348,6 +348,21 @@
   .hm-chip{ display:flex; align-items:center; gap:7px; background:#fff; border:1px solid #E1E5EC; border-radius:999px; padding:5px 11px 5px 9px; font-weight:600; font-size:12.5px; }
   .hm-chip i{ width:9px; height:9px; border-radius:50%; background:var(--c); }
   .hm-note{ grid-column:1/-1; color:#667085; font-size:12px; margin:0; }
+.rb-wrap{max-width:1100px}
+.rb-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-bottom:16px}
+.rb-card{font-family:Inter,sans-serif;text-align:left;cursor:pointer;background:#fff;border:1px solid #E4E6EC;border-left:5px solid var(--c);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:2px;color:#14181F;transition:box-shadow .15s}
+.rb-card:hover{box-shadow:0 4px 14px rgba(0,0,0,.08)}
+.rb-card.on{background:var(--c);color:#fff;border-color:var(--c)}
+.rb-name{font-size:13px;font-weight:700}.rb-card b{font-size:26px;font-weight:900}
+.rb-pct{font-size:12px;opacity:.75}
+.rb-panel{background:#fff;border:1px solid #E4E6EC;border-radius:12px;padding:16px 18px}
+.rb-head{font-size:16px;font-weight:900;margin-bottom:12px}.rb-head span{color:#6B7280;font-weight:600;font-size:13px}
+.rb-bar{display:flex;align-items:center;gap:12px;margin:8px 0;font-size:13px}
+.rb-hub{width:190px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rb-track{flex:1;background:#EEF0F4;border-radius:6px;height:20px;overflow:hidden}
+.rb-fill{height:100%;border-radius:6px}
+.rb-bar b{width:34px;text-align:right;font-weight:800}
+@media(max-width:600px){.rb-hub{width:110px}}
 </style>
 </head>
 <body>
@@ -684,7 +699,8 @@ renderGrid();
           <div class="backBtn" id="mapBackBtn" style="margin-bottom:0;">&larr; Back to contractors</div>
           
         </div>
-        <div class="map-detail-flex">
+        <div id="regionBars" class="rb-wrap"></div>
+        <div class="map-detail-flex" style="display:none">
           <div class="map-area-panel" id="mapAreaPanel"></div>
           <div class="contractor-map-box" id="contractorMapBox">
             <div class="hm-chips" id="hmChips"></div>
@@ -1049,7 +1065,40 @@ function openContractorMap(contractorName){
   }).join("");
   areaPanel.innerHTML = areaGroupsHtml || `<div class="map-area-empty">No hub data for this contractor</div>`;
 
-  renderHubMap(hubCountMap);
+  renderRegionBars(hubCountMap, contractorTotal);
+}
+
+const RB_COLORS = { Cairo:"#2563EB", Giza:"#7C3AED", Upper:"#DC2626", Alex:"#D97706", Delta:"#16A34A", Canal:"#0891B2", Other:"#6B7280" };
+function renderRegionBars(hubCountMap, total){
+  const box = document.getElementById("regionBars");
+  const regions = {};
+  Object.entries(hubCountMap).forEach(([hub, n]) => {
+    if(!(n > 0)) return;
+    const r = HUB_TO_AREA[hub] || "Other";
+    (regions[r] || (regions[r] = { total: 0, hubs: [] })).total += n;
+    regions[r].hubs.push([hub, n]);
+  });
+  const list = Object.entries(regions).sort((a, b) => b[1].total - a[1].total);
+  if(!list.length){ box.innerHTML = `<div class="map-area-empty">No hub data for this contractor</div>`; return; }
+  let sel = list[0][0];
+  const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+  function draw(){
+    const cards = list.map(([r, o]) => {
+      const pct = total ? Math.round(o.total / total * 100) : 0;
+      return `<button type="button" class="rb-card${r === sel ? " on" : ""}" data-r="${esc(r)}" style="--c:${RB_COLORS[r] || "#6B7280"}">
+        <span class="rb-name">${esc(r)}</span><b class="num">${fmt(o.total)}</b><span class="rb-pct">${pct}% · ${o.hubs.length} ${o.hubs.length === 1 ? "hub" : "hubs"}</span></button>`;
+    }).join("");
+    const o = regions[sel], c = RB_COLORS[sel] || "#6B7280";
+    const hubs = o.hubs.slice().sort((a, b) => b[1] - a[1]);
+    const max = hubs[0][1];
+    const bars = hubs.map(([h, n]) => `<div class="rb-bar"><span class="rb-hub">${esc(h)}</span>
+      <div class="rb-track"><div class="rb-fill" style="width:${Math.max(n / max * 100, 3)}%;background:${c}"></div></div>
+      <b class="num">${fmt(n)}</b></div>`).join("");
+    box.innerHTML = `<div class="rb-cards">${cards}</div>
+      <div class="rb-panel"><div class="rb-head" style="color:${c}">${esc(sel)} <span>· ${fmt(o.total)} ${o.total === 1 ? "rep" : "reps"} in ${hubs.length} ${hubs.length === 1 ? "hub" : "hubs"}</span></div>${bars}</div>`;
+    box.querySelectorAll(".rb-card").forEach(b => b.onclick = () => { sel = b.dataset.r; draw(); });
+  }
+  draw();
 }
 
 
