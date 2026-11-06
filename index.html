@@ -2238,7 +2238,9 @@ async function triggerDownload(canvas, filename){
       }
       Object.keys(tabs).forEach(k => {
         const key = parseInt(k, 10);
-        if(key !== KEY(2026, 8) && monthsIn(tabs[k]).includes(key % 12)) src[key] = tabs[k];
+        // a month that hasn't started yet can't have data (Google returns the first tab when a tab name doesn't exist)
+        const now = new Date(), nowKey = KEY(now.getFullYear(), now.getMonth());
+        if(key !== KEY(2026, 8) && key <= nowKey && monthsIn(tabs[k]).includes(key % 12)) src[key] = tabs[k];
       });
     }catch(e){ /* keep Sep only */ }
     return src;
