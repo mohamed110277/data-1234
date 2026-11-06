@@ -2213,16 +2213,21 @@ async function triggerDownload(canvas, filename){
     return tabs;
   }
   async function fetchTabsWeb(){
-    // Outside claude.ai: read each month tab by name through Google's script endpoint (no CORS issue)
+    // Outside claude.ai: read each month tab by name through Google's script endpoint (no CORS issue).
+    // Google silently returns the FIRST tab when a name doesn't exist, so anything identical to it is ignored.
     const tabs = {};
+    let firstSig = null;
+    try{ firstSig = JSON.stringify(await fetchJSONP("gid=0")); }catch(e){}
     const jobs = [];
     SHOW_GROUPS.forEach(g => g.months.forEach(m => {
       if(g.year === 2026 && m === 8) return;          // Sep 2026 is frozen
       const base = MON3[m].charAt(0).toUpperCase() + MON3[m].slice(1);
-      const nm = g.year === 2026 ? base : base + " " + g.year;
-      jobs.push(fetchJSONP("sheet=" + encodeURIComponent(nm)).then(rows => {
+      const names = g.year === 2026 ? [base, base + " " + g.year] : [base + " " + g.year];
+      names.forEach(nm => jobs.push(fetchJSONP("sheet=" + encodeURIComponent(nm)).then(rows => {
+        if(tabs[KEY(g.year, m)]) return;
+        if(firstSig && JSON.stringify(rows) === firstSig) return;   // tab not found -> Google's fallback
         if(monthsIn(rows).includes(m)) tabs[KEY(g.year, m)] = rows;
-      }).catch(() => {}));
+      }).catch(() => {})));
     }));
     await Promise.all(jobs);
     return tabs;
@@ -2238,9 +2243,7 @@ async function triggerDownload(canvas, filename){
       }
       Object.keys(tabs).forEach(k => {
         const key = parseInt(k, 10);
-        // a month that hasn't started yet can't have data (Google returns the first tab when a tab name doesn't exist)
-        const now = new Date(), nowKey = KEY(now.getFullYear(), now.getMonth());
-        if(key !== KEY(2026, 8) && key <= nowKey && monthsIn(tabs[k]).includes(key % 12)) src[key] = tabs[k];
+        if(key !== KEY(2026, 8) && monthsIn(tabs[k]).includes(key % 12)) src[key] = tabs[k];
       });
     }catch(e){ /* keep Sep only */ }
     return src;
