@@ -1894,7 +1894,7 @@ async function triggerDownload(canvas, filename){
         if(!resp || resp.status !== "ok" || !resp.table){
           return reject(new Error("gviz " + (resp && resp.errors ? JSON.stringify(resp.errors) : "bad response")));
         }
-        resolve(resp.table.rows.map(r => (r.c || []).map(c => (c == null || c.v == null) ? "" : String(c.v))));
+        resolve(resp.table.rows.map(r => (r.c || []).map(c => c == null ? "" : (c.v != null ? String(c.v) : (c.f != null ? String(c.f) : "")))));
       };
       s.onerror = () => { done(); reject(new Error("jsonp blocked")); };
       s.src = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?${sel || "gid=" + GID}&headers=0&tqx=out:json;responseHandler:${cb}&_=${Date.now()}`;
@@ -2286,10 +2286,11 @@ async function triggerDownload(canvas, filename){
     src[KEY(2026, 8)] = parseCSV(SNAPSHOT_CSV);      // September 2026: fixed, never re-read
     const inClaude = !!(window.claude && typeof window.claude.use === "function");
     try{
-      let tabs = inClaude ? await fetchTabs() : await fetchTabsWeb();
-      if(inClaude){
-        try{ const extra = await fetchTabsWeb(); Object.keys(extra).forEach(k => { if(!tabs[k]) tabs[k] = extra[k]; }); }catch(e){}
-      }
+      // Whole workbook first (reads every tab with real dates AND text dates in the same column);
+      // outside claude.ai this uses the sheet's "Publish to web" link as .xlsx.
+      let tabs = {};
+      try{ tabs = await fetchTabs(); }catch(e){ tabs = {}; }
+      try{ const extra = await fetchTabsWeb(); Object.keys(extra).forEach(k => { if(!tabs[k]) tabs[k] = extra[k]; }); }catch(e){}
       Object.keys(tabs).forEach(k => {
         const key = parseInt(k, 10);
         if(key !== KEY(2026, 8) && monthsIn(tabs[k]).includes(key % 12)) src[key] = tabs[k];
