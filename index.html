@@ -2152,6 +2152,10 @@ async function triggerDownload(canvas, filename){
     }catch(e){}
   }
 
+  // Only the numbers the sheet drives: reload happens only when rows were added / changed.
+  function dataSig(l){
+    return JSON.stringify([l.AVAIL, l.KEY, l.HUB_DAILY_DATES, l.EMBEDDED_DATA, l.CONTRACTOR_HUBS, l.TARGETS]);
+  }
   async function refresh(){
     try{
       const live = await buildSelected();
@@ -2162,7 +2166,10 @@ async function triggerDownload(canvas, filename){
         try{ location.hash = "month=" + mx; }catch(e){}
         location.reload(); return;
       }
-      if(JSON.stringify(live) !== window.__LIVE_SIG){
+      // A failed / partial read (fewer months than before) is not a change: ignore it.
+      if((live.AVAIL || []).length < (window.__LIVE_DATA && window.__LIVE_DATA.AVAIL || []).length) return;
+      if(live.KEY !== (window.__LIVE_DATA && window.__LIVE_DATA.KEY)) return;
+      if(dataSig(live) !== window.__LIVE_SIG){
         try{ sessionStorage.setItem("__dash_page", currentPageId()); }catch(e){}
         location.reload();
       }
@@ -2311,12 +2318,12 @@ async function triggerDownload(canvas, filename){
     try{
       live = await buildSelected();
       window.__LIVE_DATA = live;
-      window.__LIVE_SIG = JSON.stringify(live);
+      window.__LIVE_SIG = dataSig(live);
     }catch(e){
       window.__LOAD_ERR = (e && e.message) ? e.message : String(e);
       console.warn("Could not load Google Sheet, using saved snapshot:", e);
       live = await askForCsv(window.__LOAD_ERR);
-      if(live){ window.__LIVE_DATA = live; window.__LIVE_SIG = JSON.stringify(live); window.__LOAD_ERR = ""; }
+      if(live){ window.__LIVE_DATA = live; window.__LIVE_SIG = dataSig(live); window.__LOAD_ERR = ""; }
     }
     runApp();
     if(live){ window.__MAXKEY = Math.max.apply(null, live.AVAIL || [live.KEY]); }
